@@ -802,7 +802,7 @@ func (c *Client) hijack(method, path string, hijackOptions hijackOptions) (Close
 				if hijackOptions.setRawTerminal {
 					_, err = io.Copy(hijackOptions.stdout, br)
 				} else {
-					_, err = stdcopy.StdCopy(hijackOptions.stdout, hijackOptions.stderr, br)
+					err = nil
 				}
 				errChanOut <- err
 			}()
