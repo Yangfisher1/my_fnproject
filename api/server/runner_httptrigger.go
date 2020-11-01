@@ -21,6 +21,36 @@ func (s *Server) handleHTTPTriggerCall(c *gin.Context) {
 	}
 }
 
+func (s *Server) handleHTTPSchedulerCall(c *gin.Context) {
+
+}
+
+func (s *Server) syncFunctionInvoke(c *gin.Context, appName string, funcName string) error {
+	ctx := c.Request.Context()
+	appID, err := s.lbReadAccess.GetAppID(ctx, appName)
+	if err != nil {
+		return err
+	}
+
+	app, err := s.lbReadAccess.GetAppByID(ctx, appID)
+	if err != nil {
+		return err
+	}
+
+	trigger, err := s.lbReadAccess.GetTriggerBySource(ctx, appID, "http", funcName)
+	if err != nil {
+		return err
+	}
+
+	fn, err := s.lbReadAccess.GetFnByID(ctx, trigger.FnID)
+	if err != nil {
+		return err
+	}
+
+	err = s.ServeHTTPTrigger(c, app, fn, trigger)
+
+}
+
 // handleTriggerHTTPFunctionCall2 executes the function and returns an error
 // Requires the following in the context:
 func (s *Server) handleTriggerHTTPFunctionCall2(c *gin.Context) error {

@@ -1021,6 +1021,9 @@ func (s *Server) bindHandlers(ctx context.Context) {
 			lbFnInvokeGroup := engine.Group("/invoke")
 			lbFnInvokeGroup.POST("/:fn_id", s.handleFnInvokeCall)
 		}
+
+		lbSchedulerGroup := engine.Group("/schedule")
+		lbSchedulerGroup.Any("/", s.handleHTTPSchedulerCall)
 	}
 
 	engine.NoRoute(func(c *gin.Context) {
