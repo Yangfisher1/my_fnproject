@@ -2,7 +2,9 @@ package server
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -22,33 +24,74 @@ func (s *Server) handleHTTPTriggerCall(c *gin.Context) {
 }
 
 func (s *Server) handleHTTPSchedulerCall(c *gin.Context) {
-
+	req := getHTTPRequest("{\"name\":\"Bob\"}")
+	result, err := s.syncFunctionInvoke(c, req, "testapp", "/pyfn")
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+	c.Writer.WriteString(*result)
 }
 
-func (s *Server) syncFunctionInvoke(c *gin.Context, appName string, funcName string) error {
+func getHTTPRequest(payload string) *http.Request {
+	req := &http.Request{}
+	req.Method = "POST"
+	req.URL = &url.URL{}
+	req.Proto = "HTTP/1.1"
+	req.ProtoMajor = 1
+	req.ProtoMinor = 1
+	body := ioutil.NopCloser(strings.NewReader(payload))
+	req.Body = body
+	req.GetBody = nil
+	req.ContentLength = int64(len(payload))
+	req.TransferEncoding = make([]string, 0)
+	req.Close = false
+	req.Host = ""
+	req.Form = make(url.Values)
+	req.PostForm = make(url.Values)
+	req.MultipartForm = nil
+	req.Trailer = make(http.Header)
+	req.RemoteAddr = ""
+	req.RequestURI = ""
+	req.TLS = nil
+	req.Cancel = nil
+	return req
+}
+
+func (s *Server) syncFunctionInvoke(c *gin.Context, req *http.Request, appName string, funcName string) (*string, error) {
 	ctx := c.Request.Context()
 	appID, err := s.lbReadAccess.GetAppID(ctx, appName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	app, err := s.lbReadAccess.GetAppByID(ctx, appID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	trigger, err := s.lbReadAccess.GetTriggerBySource(ctx, appID, "http", funcName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	fn, err := s.lbReadAccess.GetFnByID(ctx, trigger.FnID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	err = s.ServeHTTPTrigger(c, app, fn, trigger)
+	requestURL := reqURL(req)
+	headers := make(http.Header, 3)
+	headers.Set("Fn-Http-Method", req.Method)
+	headers.Set("Fn-Http-Request-Url", requestURL)
+	headers.Set("Fn-Intent", "httprequest")
+	req.Header = headers
 
+	result, err := s.fnInvokeFunctionWithResult(headers, req, app, fn, trigger)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // handleTriggerHTTPFunctionCall2 executes the function and returns an error
