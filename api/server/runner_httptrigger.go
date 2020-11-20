@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -24,9 +25,24 @@ func (s *Server) handleHTTPTriggerCall(c *gin.Context) {
 }
 
 func (s *Server) handleHTTPSchedulerCall(c *gin.Context) {
-	stateMachine := mockStateMachine()
-	input := mockInput()
-	result, err := s.handleStateMachine(c, stateMachine, &input)
+	var stateMachine models.StateMachine
+	var inputString string
+	body, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+	err = json.Unmarshal(body, &stateMachine)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+	if input, ok := c.Request.Header["Input-String"]; ok {
+		inputString = input[0]
+	} else {
+		inputString = ""
+	}
+	result, err := s.handleStateMachine(c, &stateMachine, &inputString)
 	if err != nil {
 		handleErrorResponse(c, err)
 		return
