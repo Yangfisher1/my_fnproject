@@ -24,13 +24,71 @@ func (s *Server) handleHTTPTriggerCall(c *gin.Context) {
 }
 
 func (s *Server) handleHTTPSchedulerCall(c *gin.Context) {
-	req := getHTTPRequest("{\"name\":\"Bob\"}")
-	result, err := s.syncFunctionInvoke(c, req, "testapp", "/pyfn")
+	stateMachine := mockStateMachine()
+	input := mockInput()
+	result, err := s.handleStateMachine(c, stateMachine, &input)
 	if err != nil {
 		handleErrorResponse(c, err)
 		return
 	}
 	c.Writer.WriteString(*result)
+}
+
+func mockStateMachine() *models.StateMachine {
+	stateMachine := &models.StateMachine{}
+	stateMachine.StartAt = "start"
+	stateMachine.States = make(map[string]*models.State)
+	start := &models.State{}
+	end := &models.State{}
+	stateMachine.States["start"] = start
+	stateMachine.States["end"] = end
+	start.Type = "Task"
+	start.AppName = "revapp"
+	start.FuncName = "/revfunc"
+	start.Next = "end"
+	start.End = false
+	end.Type = "Task"
+	end.AppName = "revapp"
+	end.FuncName = "/revfunc"
+	end.Next = ""
+	end.End = true
+	return stateMachine
+}
+
+func mockInput() string {
+	return "Hello"
+}
+
+func (s *Server) handleStateMachine(c *gin.Context, stateMachine *models.StateMachine, input *string) (*string, error) {
+	current := stateMachine.StartAt
+	for {
+		if state, ok := stateMachine.States[current]; ok {
+			var result *string
+			var err error
+			switch state.Type {
+			case models.StateTypeTask:
+				result, err = s.handleTask(c, state, input)
+				if err != nil {
+					return result, err
+				}
+			default:
+				return nil, fmt.Errorf("Unknown state type: %s", state.Type)
+			}
+			if state.End {
+				return result, nil
+			}
+			input = result
+			current = state.Next
+		} else {
+			return nil, fmt.Errorf("Unknown state name: %s", current)
+		}
+	}
+}
+
+func (s *Server) handleTask(c *gin.Context, state *models.State, input *string) (*string, error) {
+	req := getHTTPRequest(*input)
+	result, err := s.syncFunctionInvoke(c, req, state.AppName, state.FuncName)
+	return result, err
 }
 
 func getHTTPRequest(payload string) *http.Request {
