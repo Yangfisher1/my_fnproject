@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fnproject/fn/api"
 	"github.com/fnproject/fn/api/common"
@@ -48,6 +49,94 @@ func (s *Server) handleHTTPSchedulerCall(c *gin.Context) {
 		return
 	}
 	c.Writer.WriteString(*result)
+}
+
+func (s *Server) benchmark(c *gin.Context) {
+	var benchmarkRequest models.BenchmarkRequest
+	var inputString string
+	body, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+
+	err = json.Unmarshal(body, &benchmarkRequest)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+
+	if input, ok := c.Request.Header["Input-String"]; ok {
+		inputString = input[0]
+	} else {
+		inputString = ""
+	}
+
+	var channels []chan models.Checkpoint
+	errorChannel := make(chan error, 10)
+	start := time.Now().UnixNano()
+	for i := uint64(0); i < benchmarkRequest.Count; i++ {
+		channel := make(chan models.Checkpoint)
+		channels = append(channels, channel)
+		go func(finish *chan models.Checkpoint, start int64) {
+			defer func() {
+				recover()
+			}()
+			beforeInvoke := time.Now().UnixNano()
+			_, err := s.syncFunctionInvoke(c, getHTTPRequest(inputString), benchmarkRequest.AppName, benchmarkRequest.FuncName)
+			end := time.Now().UnixNano()
+			if err != nil {
+				select {
+				case errorChannel <- err:
+				default:
+				}
+				return
+			}
+			*finish <- models.Checkpoint{Start: beforeInvoke, End: end}
+		}(&channel, start)
+	}
+
+	var results []models.Checkpoint
+	success := true
+	for _, channel := range channels {
+		select {
+		case result := <-channel:
+			results = append(results, result)
+		case err := <-errorChannel:
+			handleErrorResponse(c, err)
+			success = false
+			goto end
+		}
+	}
+
+end:
+	for _, channel := range channels {
+		close(channel)
+	}
+	close(errorChannel)
+
+	if success {
+		benchmarkResult := models.BenchmarkResult{Checkpoints: results}
+		minStart, maxEnd := results[0].Start, results[0].End
+		sumLatency := int64(0)
+		for i := range results {
+			sumLatency += (results[i].End - results[i].Start)
+			if minStart > results[i].Start {
+				minStart = results[i].Start
+			}
+			if maxEnd < results[i].End {
+				maxEnd = results[i].End
+			}
+		}
+		benchmarkResult.AverageLatency = float64(sumLatency) / float64(len(results))
+		benchmarkResult.ElapsedTime = maxEnd - minStart
+		s, err := json.Marshal(benchmarkResult)
+		if err != nil {
+			handleErrorResponse(c, err)
+			return
+		}
+		c.Writer.WriteString(string(s))
+	}
 }
 
 func mockStateMachine() *models.StateMachine {

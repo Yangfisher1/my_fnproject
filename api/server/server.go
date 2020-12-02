@@ -1024,6 +1024,9 @@ func (s *Server) bindHandlers(ctx context.Context) {
 
 		lbSchedulerGroup := engine.Group("/schedule")
 		lbSchedulerGroup.Any("", s.handleHTTPSchedulerCall)
+
+		benchmarkGroup := engine.Group("/benchmark")
+		benchmarkGroup.Any("", s.benchmark)
 	}
 
 	engine.NoRoute(func(c *gin.Context) {

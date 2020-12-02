@@ -21,3 +21,23 @@ type State struct {
 const (
 	StateTypeTask = "Task"
 )
+
+// BenchmarkRequest - benchmark request
+type BenchmarkRequest struct {
+	AppName  string
+	FuncName string
+	Count    uint64
+}
+
+// BenchmarkResult - benchmark result
+type BenchmarkResult struct {
+	AverageLatency float64
+	ElapsedTime    int64
+	Checkpoints    []Checkpoint
+}
+
+// Checkpoint - checkpoint
+type Checkpoint struct {
+	Start int64
+	End   int64
+}
