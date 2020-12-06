@@ -38,6 +38,8 @@ type BenchmarkResult struct {
 
 // Checkpoint - checkpoint
 type Checkpoint struct {
-	Start int64
-	End   int64
+	Start       int64
+	End         int64
+	Checkpoints []int64
+	ElapsedTime []int64
 }

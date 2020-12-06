@@ -83,7 +83,7 @@ func (s *Server) benchmark(c *gin.Context) {
 				recover()
 			}()
 			beforeInvoke := time.Now().UnixNano()
-			_, err := s.syncFunctionInvoke(c, getHTTPRequest(inputString), benchmarkRequest.AppName, benchmarkRequest.FuncName)
+			_, checkpoints, err := s.syncFunctionInvokeBenchmark(c, getHTTPRequest(inputString), benchmarkRequest.AppName, benchmarkRequest.FuncName)
 			end := time.Now().UnixNano()
 			if err != nil {
 				select {
@@ -92,7 +92,11 @@ func (s *Server) benchmark(c *gin.Context) {
 				}
 				return
 			}
-			*finish <- models.Checkpoint{Start: beforeInvoke, End: end}
+			var elapsedTime []int64
+			for i := range checkpoints {
+				elapsedTime = append(elapsedTime, checkpoints[i]-beforeInvoke)
+			}
+			*finish <- models.Checkpoint{Start: beforeInvoke, End: end, Checkpoints: checkpoints, ElapsedTime: elapsedTime}
 		}(&channel, start)
 	}
 
@@ -255,6 +259,54 @@ func (s *Server) syncFunctionInvoke(c *gin.Context, req *http.Request, appName s
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *Server) syncFunctionInvokeBenchmark(c *gin.Context, req *http.Request, appName string, funcName string) (*string, []int64, error) {
+	var checkpoints []int64
+	ctx := c.Request.Context()
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	appID, err := s.lbReadAccess.GetAppID(ctx, appName)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	app, err := s.lbReadAccess.GetAppByID(ctx, appID)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	trigger, err := s.lbReadAccess.GetTriggerBySource(ctx, appID, "http", funcName)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	fn, err := s.lbReadAccess.GetFnByID(ctx, trigger.FnID)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	requestURL := reqURL(req)
+	headers := make(http.Header, 3)
+	headers.Set("Fn-Http-Method", req.Method)
+	headers.Set("Fn-Http-Request-Url", requestURL)
+	headers.Set("Fn-Intent", "httprequest")
+	req.Header = headers
+
+	result, err := s.fnInvokeFunctionWithResult(headers, req, app, fn, trigger)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+	return result, checkpoints, nil
 }
 
 // handleTriggerHTTPFunctionCall2 executes the function and returns an error
