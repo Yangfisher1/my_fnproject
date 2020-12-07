@@ -1069,7 +1069,6 @@ func inotifyAwait(ctx context.Context, iofsDir string, udsWait chan error) {
 func (a *agent) runHotReq(ctx context.Context, call *call, state ContainerState, logger logrus.FieldLogger, cookie drivers.Cookie, slot *hotSlot, c *container) bool {
 
 	var err error
-	isFrozen := false
 
 	freezeTimer := common.NewTimer(a.cfg.FreezeIdle)
 	idleTimer := common.NewTimer(time.Duration(call.IdleTimeout) * time.Second)
@@ -1097,18 +1096,6 @@ func (a *agent) runHotReq(ctx context.Context, call *call, state ContainerState,
 		case <-ctx.Done(): // container shutdown
 		case <-a.shutWg.Closer(): // agent shutdown
 		case <-idleTimer.C:
-		case <-freezeTimer.C:
-			if !isFrozen {
-				ctx, cancel := context.WithTimeout(ctx, pauseTimeout)
-				err = cookie.Freeze(ctx)
-				cancel()
-				if err != nil {
-					return false
-				}
-				isFrozen = true
-				state.UpdateState(ctx, ContainerStatePaused, call)
-			}
-			continue
 		case <-evicted:
 		}
 		break
@@ -1129,18 +1116,6 @@ func (a *agent) runHotReq(ctx context.Context, call *call, state ContainerState,
 	// We disable eviction after acquisition attempt above, since
 	// this can reinstall an eviction token if eviction has taken place.
 	c.DisableEviction(call)
-
-	// In case, timer/acquireSlot failure landed us here, make
-	// sure to unfreeze.
-	if isFrozen {
-		ctx, cancel := context.WithTimeout(ctx, pauseTimeout)
-		err = cookie.Unfreeze(ctx)
-		cancel()
-		if err != nil {
-			return false
-		}
-		isFrozen = false
-	}
 
 	state.UpdateState(ctx, ContainerStateBusy, call)
 	return true

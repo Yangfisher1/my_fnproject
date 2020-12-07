@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -90,6 +91,7 @@ func (s *Server) ServeFnInvoke(c *gin.Context, app *models.App, fn *models.Fn) e
 func (s *Server) fnInvoke(resp http.ResponseWriter, req *http.Request, app *models.App, fn *models.Fn, trig *models.Trigger) error {
 	// TODO: we should get rid of the buffers, and stream back (saves memory (+splice), faster (splice), allows streaming, don't have to cap resp size)
 	// buffer the response before writing it out to client to prevent partials from trying to stream
+	fmt.Printf("http.Request: %v\n", *req)
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	var writer ResponseBuffer
@@ -131,9 +133,46 @@ func (s *Server) fnInvoke(resp http.ResponseWriter, req *http.Request, app *mode
 		return nil
 	}
 
+	fmt.Print("Function returns: ")
+	fmt.Println(buf.String())
 	io.Copy(resp, buf)
 	bufPool.Put(buf) // at this point, submit returned without timing out, so we can re-use this one
 	return nil
+}
+
+func (s *Server) fnInvokeFunctionWithResult(header http.Header, req *http.Request, app *models.App, fn *models.Fn, trig *models.Trigger) (*string, error) {
+	fmt.Println("in fnInvokeFunctionWithResult")
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+	var writer ResponseBuffer
+
+	writer = &syncResponseWriter{
+		headers: header,
+		status:  200,
+		Buffer:  buf,
+	}
+
+	opts := getCallOptions(req, app, fn, trig, writer)
+
+	call, err := s.agent.GetCall(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// add this before submit, always tie a call id to the response at this point
+	writer.Header().Add("Fn-Call-Id", call.Model().ID)
+
+	err = s.agent.Submit(call)
+	if err != nil {
+		return nil, err
+	}
+
+	res := buf.String()
+
+	fmt.Printf("result: %s\n", res)
+
+	return &res, nil
 }
 
 func getCallOptions(req *http.Request, app *models.App, fn *models.Fn, trig *models.Trigger, rw http.ResponseWriter) []agent.CallOpt {

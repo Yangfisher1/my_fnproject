@@ -1,10 +1,14 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fnproject/fn/api"
 	"github.com/fnproject/fn/api/common"
@@ -19,6 +23,290 @@ func (s *Server) handleHTTPTriggerCall(c *gin.Context) {
 	if err != nil {
 		handleErrorResponse(c, err)
 	}
+}
+
+func (s *Server) handleHTTPSchedulerCall(c *gin.Context) {
+	var stateMachine models.StateMachine
+	var inputString string
+	body, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+	err = json.Unmarshal(body, &stateMachine)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+	if input, ok := c.Request.Header["Input-String"]; ok {
+		inputString = input[0]
+	} else {
+		inputString = ""
+	}
+	result, err := s.handleStateMachine(c, &stateMachine, &inputString)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+	c.Writer.WriteString(*result)
+}
+
+func (s *Server) benchmark(c *gin.Context) {
+	var benchmarkRequest models.BenchmarkRequest
+	var inputString string
+	body, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+
+	err = json.Unmarshal(body, &benchmarkRequest)
+	if err != nil {
+		handleErrorResponse(c, err)
+		return
+	}
+
+	if input, ok := c.Request.Header["Input-String"]; ok {
+		inputString = input[0]
+	} else {
+		inputString = ""
+	}
+
+	var channels []chan models.Checkpoint
+	errorChannel := make(chan error, 10)
+	start := time.Now().UnixNano()
+	for i := uint64(0); i < benchmarkRequest.Count; i++ {
+		channel := make(chan models.Checkpoint)
+		channels = append(channels, channel)
+		go func(finish *chan models.Checkpoint, start int64) {
+			defer func() {
+				recover()
+			}()
+			beforeInvoke := time.Now().UnixNano()
+			_, checkpoints, err := s.syncFunctionInvokeBenchmark(c, getHTTPRequest(inputString), benchmarkRequest.AppName, benchmarkRequest.FuncName)
+			end := time.Now().UnixNano()
+			if err != nil {
+				select {
+				case errorChannel <- err:
+				default:
+				}
+				return
+			}
+			var elapsedTime []int64
+			for i := range checkpoints {
+				elapsedTime = append(elapsedTime, checkpoints[i]-beforeInvoke)
+			}
+			*finish <- models.Checkpoint{Start: beforeInvoke, End: end, Checkpoints: checkpoints, ElapsedTime: elapsedTime}
+		}(&channel, start)
+	}
+
+	var results []models.Checkpoint
+	success := true
+	for _, channel := range channels {
+		select {
+		case result := <-channel:
+			results = append(results, result)
+		case err := <-errorChannel:
+			handleErrorResponse(c, err)
+			success = false
+			goto end
+		}
+	}
+
+end:
+	for _, channel := range channels {
+		close(channel)
+	}
+	close(errorChannel)
+
+	if success {
+		benchmarkResult := models.BenchmarkResult{Checkpoints: results}
+		minStart, maxEnd := results[0].Start, results[0].End
+		sumLatency := int64(0)
+		for i := range results {
+			sumLatency += (results[i].End - results[i].Start)
+			if minStart > results[i].Start {
+				minStart = results[i].Start
+			}
+			if maxEnd < results[i].End {
+				maxEnd = results[i].End
+			}
+		}
+		benchmarkResult.AverageLatency = float64(sumLatency) / float64(len(results))
+		benchmarkResult.ElapsedTime = maxEnd - minStart
+		s, err := json.Marshal(benchmarkResult)
+		if err != nil {
+			handleErrorResponse(c, err)
+			return
+		}
+		c.Writer.WriteString(string(s))
+	}
+}
+
+func mockStateMachine() *models.StateMachine {
+	stateMachine := &models.StateMachine{}
+	stateMachine.StartAt = "start"
+	stateMachine.States = make(map[string]*models.State)
+	start := &models.State{}
+	end := &models.State{}
+	stateMachine.States["start"] = start
+	stateMachine.States["end"] = end
+	start.Type = "Task"
+	start.AppName = "revapp"
+	start.FuncName = "/revfunc"
+	start.Next = "end"
+	start.End = false
+	end.Type = "Task"
+	end.AppName = "revapp"
+	end.FuncName = "/revfunc"
+	end.Next = ""
+	end.End = true
+	return stateMachine
+}
+
+func mockInput() string {
+	return "Hello"
+}
+
+func (s *Server) handleStateMachine(c *gin.Context, stateMachine *models.StateMachine, input *string) (*string, error) {
+	current := stateMachine.StartAt
+	for {
+		if state, ok := stateMachine.States[current]; ok {
+			var result *string
+			var err error
+			switch state.Type {
+			case models.StateTypeTask:
+				result, err = s.handleTask(c, state, input)
+				if err != nil {
+					return result, err
+				}
+			default:
+				return nil, fmt.Errorf("Unknown state type: %s", state.Type)
+			}
+			if state.End {
+				return result, nil
+			}
+			input = result
+			current = state.Next
+		} else {
+			return nil, fmt.Errorf("Unknown state name: %s", current)
+		}
+	}
+}
+
+func (s *Server) handleTask(c *gin.Context, state *models.State, input *string) (*string, error) {
+	req := getHTTPRequest(*input)
+	result, err := s.syncFunctionInvoke(c, req, state.AppName, state.FuncName)
+	return result, err
+}
+
+func getHTTPRequest(payload string) *http.Request {
+	req := &http.Request{}
+	req.Method = "POST"
+	req.URL = &url.URL{}
+	req.Proto = "HTTP/1.1"
+	req.ProtoMajor = 1
+	req.ProtoMinor = 1
+	body := ioutil.NopCloser(strings.NewReader(payload))
+	req.Body = body
+	req.GetBody = nil
+	req.ContentLength = int64(len(payload))
+	req.TransferEncoding = make([]string, 0)
+	req.Close = false
+	req.Host = ""
+	req.Form = make(url.Values)
+	req.PostForm = make(url.Values)
+	req.MultipartForm = nil
+	req.Trailer = make(http.Header)
+	req.RemoteAddr = ""
+	req.RequestURI = ""
+	req.TLS = nil
+	req.Cancel = nil
+	return req
+}
+
+func (s *Server) syncFunctionInvoke(c *gin.Context, req *http.Request, appName string, funcName string) (*string, error) {
+	ctx := c.Request.Context()
+	appID, err := s.lbReadAccess.GetAppID(ctx, appName)
+	if err != nil {
+		return nil, err
+	}
+
+	app, err := s.lbReadAccess.GetAppByID(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+
+	trigger, err := s.lbReadAccess.GetTriggerBySource(ctx, appID, "http", funcName)
+	if err != nil {
+		return nil, err
+	}
+
+	fn, err := s.lbReadAccess.GetFnByID(ctx, trigger.FnID)
+	if err != nil {
+		return nil, err
+	}
+
+	requestURL := reqURL(req)
+	headers := make(http.Header, 3)
+	headers.Set("Fn-Http-Method", req.Method)
+	headers.Set("Fn-Http-Request-Url", requestURL)
+	headers.Set("Fn-Intent", "httprequest")
+	req.Header = headers
+
+	result, err := s.fnInvokeFunctionWithResult(headers, req, app, fn, trigger)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Server) syncFunctionInvokeBenchmark(c *gin.Context, req *http.Request, appName string, funcName string) (*string, []int64, error) {
+	var checkpoints []int64
+	ctx := c.Request.Context()
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	appID, err := s.lbReadAccess.GetAppID(ctx, appName)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	app, err := s.lbReadAccess.GetAppByID(ctx, appID)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	trigger, err := s.lbReadAccess.GetTriggerBySource(ctx, appID, "http", funcName)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	fn, err := s.lbReadAccess.GetFnByID(ctx, trigger.FnID)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+
+	checkpoints = append(checkpoints, time.Now().UnixNano())
+
+	requestURL := reqURL(req)
+	headers := make(http.Header, 3)
+	headers.Set("Fn-Http-Method", req.Method)
+	headers.Set("Fn-Http-Request-Url", requestURL)
+	headers.Set("Fn-Intent", "httprequest")
+	req.Header = headers
+
+	result, err := s.fnInvokeFunctionWithResult(headers, req, app, fn, trigger)
+	if err != nil {
+		return nil, checkpoints, err
+	}
+	return result, checkpoints, nil
 }
 
 // handleTriggerHTTPFunctionCall2 executes the function and returns an error
