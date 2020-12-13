@@ -4,13 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	runner "github.com/fnproject/fn/api/agent/grpc"
-	"github.com/fnproject/fn/api/common"
-	"github.com/fnproject/fn/api/id"
-	"github.com/fnproject/fn/api/models"
-	"github.com/golang/protobuf/jsonpb"
-	"github.com/golang/protobuf/ptypes/empty"
-	pbst "github.com/golang/protobuf/ptypes/struct"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +13,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	runner "github.com/fnproject/fn/api/agent/grpc"
+	"github.com/fnproject/fn/api/common"
+	"github.com/fnproject/fn/api/id"
+	"github.com/fnproject/fn/api/models"
+	"github.com/golang/protobuf/jsonpb"
+	"github.com/golang/protobuf/ptypes/empty"
+	pbst "github.com/golang/protobuf/ptypes/struct"
 )
 
 const v1StatusRequest = "{}"
@@ -318,7 +319,7 @@ func (st *statusTracker) newStatusCall(payload json.RawMessage) models.Call {
 	c.ID = id.New().String()
 	c.Image = st.imageName
 	c.Type = models.TypeSync
-	c.TmpFsSize = 0
+	c.TmpFsSize = 2048
 	// IMPORTANT: mem/cpu set to zero. This means status containers cannot be evicted.
 	c.Memory = 0
 	c.CPUs = models.MilliCPUs(0)

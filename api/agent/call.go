@@ -63,7 +63,7 @@ func FromHTTPFnRequest(app *models.App, fn *models.Fn, req *http.Request) CallOp
 			Type:        models.TypeSync,
 			Timeout:     fn.Timeout,
 			IdleTimeout: fn.IdleTimeout,
-			TmpFsSize:   0, // TODO clean up this
+			TmpFsSize:   2048, // TODO clean up this
 			Memory:      fn.Memory,
 			CPUs:        0, // TODO clean up this
 			Config:      buildConfig(app, fn),
