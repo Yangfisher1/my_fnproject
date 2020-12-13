@@ -1008,10 +1008,14 @@ func inotifyAwait(ctx context.Context, iofsDir string, udsWait chan error) {
 	// Here we create the fs notify (inotify) synchronously and once that is
 	// setup, then fork off our async go-routine. Basically fsnotify should be enabled
 	// before we launch the container in order not to miss any events.
-	fsWatcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		udsWait <- fmt.Errorf("error getting fsnotify watcher: %v", err)
-		return
+	var fsWatcher *fsnotify.Watcher
+	var err error
+	for {
+		fsWatcher, err = fsnotify.NewWatcher()
+		if err != nil {
+			continue
+		}
+		break
 	}
 
 	err = fsWatcher.Add(iofsDir)
