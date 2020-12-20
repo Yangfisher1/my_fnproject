@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -82,21 +83,36 @@ func (s *Server) benchmark(c *gin.Context) {
 			defer func() {
 				recover()
 			}()
+			defer func() {
+				runtime.UnlockOSThread()
+			}()
+			runtime.LockOSThread()
 			beforeInvoke := time.Now().UnixNano()
-			_, checkpoints, err := s.syncFunctionInvokeBenchmark(c, getHTTPRequest(inputString), benchmarkRequest.AppName, benchmarkRequest.FuncName)
-			end := time.Now().UnixNano()
-			if err != nil {
+			timer := time.After(time.Duration(benchmarkRequest.Time) * time.Second)
+			var checkpoints []int64
+			var err error
+			completedRequest := 0
+			errorCount := int64(0)
+		SendLoop:
+			for {
+				_, checkpoints, err = s.syncFunctionInvokeBenchmark(c, getHTTPRequest(inputString), benchmarkRequest.AppName, benchmarkRequest.FuncName)
+				if err != nil {
+					errorCount++
+				} else {
+					completedRequest++
+				}
 				select {
-				case errorChannel <- err:
+				case <-timer:
+					break SendLoop
 				default:
 				}
-				return
 			}
-			var elapsedTime []int64
-			for i := range checkpoints {
+			end := time.Now().UnixNano()
+			// var elapsedTime []int64
+			/*for i := range checkpoints {
 				elapsedTime = append(elapsedTime, checkpoints[i]-beforeInvoke)
-			}
-			*finish <- models.Checkpoint{Start: beforeInvoke, End: end, Checkpoints: checkpoints, ElapsedTime: elapsedTime}
+			}*/
+			*finish <- models.Checkpoint{Start: beforeInvoke, End: end, Checkpoints: checkpoints, CompletedRequest: int64(completedRequest), ErrorCount: errorCount}
 		}(&channel, start)
 	}
 
@@ -123,6 +139,8 @@ end:
 		benchmarkResult := models.BenchmarkResult{Checkpoints: results}
 		minStart, maxEnd := results[0].Start, results[0].End
 		sumLatency := int64(0)
+		totalCompletedRequest := int64(0)
+		totalError := int64(0)
 		for i := range results {
 			sumLatency += (results[i].End - results[i].Start)
 			if minStart > results[i].Start {
@@ -131,9 +149,14 @@ end:
 			if maxEnd < results[i].End {
 				maxEnd = results[i].End
 			}
+			totalCompletedRequest += results[i].CompletedRequest
+			totalError += results[i].ErrorCount
 		}
-		benchmarkResult.AverageLatency = float64(sumLatency) / float64(len(results))
 		benchmarkResult.ElapsedTime = maxEnd - minStart
+		benchmarkResult.AverageLatency = float64(benchmarkResult.ElapsedTime) / float64(uint64(totalCompletedRequest)/benchmarkRequest.Count)
+		benchmarkResult.TotalCompletedRequest = totalCompletedRequest
+		benchmarkResult.TotalError = totalError
+		benchmarkResult.AverageThroughput = float64(totalCompletedRequest) / float64(benchmarkResult.ElapsedTime)
 		s, err := json.Marshal(benchmarkResult)
 		if err != nil {
 			handleErrorResponse(c, err)

@@ -141,7 +141,6 @@ func (s *Server) fnInvoke(resp http.ResponseWriter, req *http.Request, app *mode
 }
 
 func (s *Server) fnInvokeFunctionWithResult(header http.Header, req *http.Request, app *models.App, fn *models.Fn, trig *models.Trigger) (*string, error) {
-	fmt.Println("in fnInvokeFunctionWithResult")
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bufPool.Put(buf)
