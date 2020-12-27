@@ -197,11 +197,44 @@ func (s *Server) handleStateMachine(c *gin.Context, stateMachine *models.StateMa
 		if state, ok := stateMachine.States[current]; ok {
 			var result *string
 			var err error
+			var intermediateMap map[string]interface{}
 			switch state.Type {
 			case models.StateTypeTask:
 				result, err = s.handleTask(c, state, input)
 				if err != nil {
 					return result, err
+				}
+			case models.StateTypeParallel:
+				{
+					intermediateMap = make(map[string]interface{})
+					err = json.Unmarshal([]byte(*input), &intermediateMap)
+					if err != nil {
+						return nil, err
+					}
+					parallelExecution := state.ParallelExecution
+					if parallelExecution == nil {
+						return nil, fmt.Errorf("a parallel task requires ParallelExecution field")
+					}
+
+					iterableItems, ok := intermediateMap[parallelExecution.IterableItemsKey]
+					if !ok {
+						return nil, fmt.Errorf("required key %s not found", parallelExecution.IterableItemsKey)
+					}
+
+					iterableItemsArray, ok := iterableItems.([]interface{})
+					if !ok {
+						return nil, fmt.Errorf("required []interface{} type, get %T", iterableItems)
+					}
+					results, err := s.handleParallel(c, &parallelExecution.StateMachine, iterableItemsArray, parallelExecution.IterableItemName)
+					if err != nil {
+						return nil, err
+					}
+					jsonBytes, err := json.Marshal(results)
+					if err != nil {
+						return nil, err
+					}
+					jsonString := string(jsonBytes)
+					result = &jsonString
 				}
 			default:
 				return nil, fmt.Errorf("Unknown state type: %s", state.Type)
@@ -221,6 +254,44 @@ func (s *Server) handleTask(c *gin.Context, state *models.State, input *string) 
 	req := getHTTPRequest(*input)
 	result, err := s.syncFunctionInvoke(c, req, state.AppName, state.FuncName)
 	return result, err
+}
+
+func (s *Server) handleParallel(c *gin.Context, stateMachine *models.StateMachine, iterableItems []interface{}, iterableItemName string) ([]*string, error) {
+	parallelCount := len(iterableItems)
+	resultChannels := make([]chan *string, parallelCount)
+	errChannels := make([]chan error, parallelCount)
+
+	for i := range iterableItems {
+		resultChannel := make(chan *string)
+		errChannel := make(chan error)
+		resultChannels[i] = resultChannel
+		errChannels[i] = errChannel
+		input := make(map[string]interface{})
+		input[iterableItemName] = iterableItems[i]
+		payload, err := json.Marshal(input)
+		if err != nil {
+			return nil, err
+		}
+		inputString := string(payload)
+		go func(resultChannel chan *string, errChannel chan error) {
+			result, err := s.handleStateMachine(c, stateMachine, &inputString)
+			resultChannel <- result
+			errChannel <- err
+		}(resultChannel, errChannel)
+	}
+
+	results := make([]*string, parallelCount)
+	errors := make([]error, parallelCount)
+	var err error
+	for i := 0; i < parallelCount; i++ {
+		results[i] = <-resultChannels[i]
+		errors[i] = <-errChannels[i]
+		if errors[i] != nil {
+			err = errors[i]
+		}
+	}
+
+	return results, err
 }
 
 func getHTTPRequest(payload string) *http.Request {

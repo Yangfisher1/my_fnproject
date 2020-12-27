@@ -9,17 +9,26 @@ type StateMachine struct {
 
 // State Single state in the state machine
 type State struct {
-	Type     string
-	AppName  string
-	FuncName string
-	Next     string
-	Comment  string
-	End      bool
+	Type              string
+	AppName           string
+	FuncName          string
+	Next              string
+	Comment           string
+	End               bool
+	ParallelExecution *ParallelExecution
+}
+
+// ParallelExecution records the metadata for parallel execution
+type ParallelExecution struct {
+	IterableItemsKey string
+	IterableItemName string
+	StateMachine     StateMachine
 }
 
 // Constants
 const (
-	StateTypeTask = "Task"
+	StateTypeTask     = "Task"
+	StateTypeParallel = "Parallel"
 )
 
 // BenchmarkRequest - benchmark request
