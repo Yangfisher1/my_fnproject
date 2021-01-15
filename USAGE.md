@@ -220,9 +220,60 @@ We will invoke the function chain. `fn-playground/rev_pipeline.json` defines a s
 		}
 	}
 }
+```
 
 Invoke the pipeline with curl. Make sure you are in the same directory with rev_pipeline.json.
 
 ```bash
 curl -X POST -d @rev_pipeline.json --header 'Input-String: Hello' http://val13:8082/schedule # access the /schedule endpoint of the fn scheduler, and it will return Hello
+```
+
+#### Video Pipeline
+
+```bash
+cd fn-playground/videoapp/
+ls # there will be 3 functions
+fn create app videoapp # it is ok if fn complains this app already exists
+```
+
+We need to upload a demo video (typically not too long) to the memcached as the input.
+
+```bash
+# TODO: add a upload script here
+```
+
+##### function split-video
+
+```bash
+cd split-video
+fn --verbose deploy --app videoapp
+```
+
+##### function extract-frame
+
+```bash
+cd extract-frame
+cp ../split-video/ffprobe . && cp ../split-video/ffmpeg .
+fn --verbose deploy --app videoapp
+```
+
+##### function frame-recognition
+
+```bash
+cd frame-recognition
+
+# copy dependencies from an existing image -- jamesthomas/action-nodejs-v8:tfjs
+CID=$(docker create jamesthomas/action-nodejs-v8:tfjs)
+docker cp ${CID}:/nodejsAction/mobilenet .
+docker cp ${CID}:/nodejsAction/node_modules .
+docker rm -f ${CID}
+
+# now we have the dependencies
+fn --verbose deploy --app videoapp
+```
+
+##### Invoke the pipeline
+
+```bash
+# TODO
 ```
