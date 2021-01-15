@@ -6,7 +6,7 @@ The Fn project is an open-source container-native serverless platform, which sup
 
 ## Pre-requisites
 
-Docker 17.10.0-ce or later installed and running
+Docker 17.10.0-ce or later installed and running. Docker is also required on the machine installed with fn cli tool.
 
 Download the latest release of fn cli tool from [https://github.com/fnproject/cli/releases](https://github.com/fnproject/cli/releases) and move the executable to your $PATH
 
@@ -180,4 +180,49 @@ fn create context val-context --api-url http://val09:8080 --registry val01:5000
 
 ### Deployment and Invocation of a function chain
 
-// TODO
+#### Simple Reverse String
+
+First, we should deploy a runnable string-reverse function.
+
+```bash
+git clone https://ipads.se.sjtu.edu.cn:1312/distributed-rdma-serverless/fn-playground.git
+cd fn-playground/revapp/reverse-string
+fn create app revapp # create a "revapp" app, it is fine if fn complains that "App already exists"
+# "fn deploy" command will build the docker image, push the image to the registry specified above (--registry) and write the function metadata through (--api-url).
+fn --verbose deploy --app revapp
+# "fn ls triggers <app>" will show all the http trigger endpoints of an app
+fn ls triggers revapp
+curl -X POST -d 'hello' http://val13:8082/t/revapp/reverse-string # use curl to invoke the function, it will returns 'olleh'
+```
+
+We will invoke the function chain. `fn-playground/rev_pipeline.json` defines a simple function chain which reverses the input string twice and returns the final result.
+
+```json
+{
+	"Comment": "",
+	"StartAt": "start",
+	"States": {
+		"start": {
+			"Type": "Task",
+			"AppName": "revapp",
+			"FuncName": "/reverse-string",
+			"Next": "end",
+			"Comment": "",
+			"End": false
+		},
+		"end": {
+			"Type": "Task",
+			"AppName": "revapp",
+			"FuncName": "/reverse-string",
+			"Next": "",
+			"Comment": "",
+			"End": true
+		}
+	}
+}
+
+Invoke the pipeline with curl. Make sure you are in the same directory with rev_pipeline.json.
+
+```bash
+curl -X POST -d @rev_pipeline.json --header 'Input-String: Hello' http://val13:8082/schedule # access the /schedule endpoint of the fn scheduler, and it will return Hello
+```
