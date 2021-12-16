@@ -1022,6 +1022,22 @@ func (s *Server) bindHandlers(ctx context.Context) {
 			lbFnInvokeGroup.POST("/:fn_id", s.handleFnInvokeCall)
 		}
 
+		lbSpikeGroup := engine.Group("/spike")
+		lbSpikeGroup.Any("/:fn_id/*spike_cnt", s.handleSpikeCall)
+
+		// API for random function invoke, useless, abondon for now
+		lbRandomGroup := engine.Group("/random")
+		lbRandomGroup.Any("/:fn_id/*spike_cnt", s.randomInvoke)
+
+		lbRealSpikeGroup := engine.Group("/realspike")
+		lbRealSpikeGroup.Any("/:fn_id/*spike_cnt", s.handleRealSpike)
+
+		lbRealSpikeGroup2 := engine.Group("/realspike2")
+		lbRealSpikeGroup2.Any("/:fn_id/*spike_cnt", s.handleRealSpike2)
+
+		lbCacheGroup := engine.Group("/cache")
+		lbCacheGroup.Any("/:fn_id/*spike_cnt", s.handleCache)
+
 		lbSchedulerGroup := engine.Group("/schedule")
 		lbSchedulerGroup.Any("", s.handleHTTPSchedulerCall)
 

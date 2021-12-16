@@ -67,6 +67,8 @@ func (s *Server) benchmark(c *gin.Context) {
 		return
 	}
 
+	fmt.Println("Benchmark requests", benchmarkRequest)
+
 	if input, ok := c.Request.Header["Input-String"]; ok {
 		inputString = input[0]
 	} else {
@@ -153,10 +155,15 @@ end:
 			totalError += results[i].ErrorCount
 		}
 		benchmarkResult.ElapsedTime = maxEnd - minStart
+		// maybe here
 		benchmarkResult.AverageLatency = float64(benchmarkResult.ElapsedTime) / float64(uint64(totalCompletedRequest)/benchmarkRequest.Count)
 		benchmarkResult.TotalCompletedRequest = totalCompletedRequest
 		benchmarkResult.TotalError = totalError
 		benchmarkResult.AverageThroughput = float64(totalCompletedRequest) / float64(benchmarkResult.ElapsedTime)
+
+		// which one may be zero?
+		fmt.Println("benchmarkResult", benchmarkResult.ElapsedTime, benchmarkResult.AverageLatency, benchmarkResult.TotalCompletedRequest, benchmarkResult.TotalError, benchmarkResult.AverageThroughput)
+
 		s, err := json.Marshal(benchmarkResult)
 		if err != nil {
 			handleErrorResponse(c, err)

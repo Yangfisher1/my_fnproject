@@ -458,6 +458,8 @@ func (a *agent) checkLaunch(ctx context.Context, call *call, caller slotCaller) 
 	// IMPORTANT: we are here because: isNewContainerNeeded is true,
 	// in other words, we need to launch a new container at this time due to high load.
 
+	fmt.Println("we need a new container", call.FnID)
+
 	state := NewContainerState()
 	state.UpdateState(ctx, ContainerStateWait, call)
 
@@ -590,7 +592,7 @@ func (s *hotSlot) exec(ctx context.Context, call *call) error {
 	call.requestState.UpdateState(ctx, RequestStateExec, call.slots)
 
 	// link the container id and id in the logs [for us!]
-	common.Logger(ctx).WithField("container_id", s.container.id).Info("starting call")
+	// common.Logger(ctx).WithField("container_id", s.container.id).Info("starting call")
 
 	// link the container span to ours for additional context (start/freeze/etc.)
 	span.AddLink(trace.Link{
@@ -1205,7 +1207,7 @@ func newHotContainer(ctx context.Context, evictor Evictor, caller *slotCaller, c
 		gw := common.NewGhostWriter()
 		buf1 := bufPool.Get().(*bytes.Buffer)
 		sec := &nopCloser{&logWriter{
-			logrus.WithFields(logrus.Fields{"tag": "stderr", "app_id": call.AppID, "fn_id": call.FnID, "image": call.Image, "container_id": id}),
+			// logrus.WithFields(logrus.Fields{"tag": "stderr", "app_id": call.AppID, "fn_id": call.FnID, "image": call.Image, "container_id": id}),
 		}}
 		gw.Swap(newLineWriterWithBuffer(buf1, sec))
 		stderr = gw

@@ -16,6 +16,9 @@ const (
 	// TriggerSource is the triggers source parameter
 	TriggerSource string = "trigger_source"
 
+	// SpikeCnt is the spike num parameter
+	SpikeCnt string = "spike_cnt"
+
 	//TriggerType is the trigger type parameter - only used in hybrid API
 	TriggerType string = "trigger_type"
 )
